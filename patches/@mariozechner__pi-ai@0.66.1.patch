@@ -1,0 +1,13 @@
+diff --git a/dist/providers/anthropic.js b/dist/providers/anthropic.js
+index 0000000000000000000000000000000000000000..0000000000000000000000000000000000000001 100644
+--- a/dist/providers/anthropic.js
++++ b/dist/providers/anthropic.js
+@@ -24,7 +24,7 @@
+ function getCacheControl(baseUrl, cacheRetention) {
+     const retention = resolveCacheRetention(cacheRetention);
+     if (retention === "none") {
+         return { retention };
+     }
+-    const ttl = retention === "long" && baseUrl.includes("api.anthropic.com") ? "1h" : undefined;
++    const ttl = retention === "long" ? "1h" : undefined;
+     return {
