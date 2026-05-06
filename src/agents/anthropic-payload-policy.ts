@@ -223,20 +223,37 @@ export function applyAnthropicPayloadPolicyToParams(
   applyAnthropicCacheControlToMessages(payloadObj.messages, policy.cacheControl);
 }
 
+/**
+ * Default cache_control marker used when no explicit retention is provided.
+ * Retained for backward compatibility with callers that don't pass cacheControl.
+ */
+const DEFAULT_EPHEMERAL_CACHE_CONTROL: AnthropicEphemeralCacheControl = {
+  type: "ephemeral",
+};
+
+/**
+ * Apply Anthropic-style ephemeral cache_control markers to the payload.
+ *
+ * When `cacheControl` is provided (e.g. from `resolveAnthropicEphemeralCacheControl`
+ * with a `cacheRetention` of "long"), its `ttl` field is preserved on every marker.
+ * When omitted, falls back to `{ type: "ephemeral" }` (no ttl) for backward compat.
+ *
+ * This fixes the OpenRouter cache-TTL bug where the wrapper was hardcoding
+ * `{ type: "ephemeral" }` and discarding the `ttl: "1h"` that the user's
+ * `cacheRetention: "long"` config should have produced.
+ */
 export function applyAnthropicEphemeralCacheControlMarkers(
   payloadObj: Record<string, unknown>,
+  cacheControl: AnthropicEphemeralCacheControl = DEFAULT_EPHEMERAL_CACHE_CONTROL,
 ): void {
   const messages = payloadObj.messages;
   if (!Array.isArray(messages)) {
     return;
   }
-
   for (const message of messages as Array<{ role?: string; content?: unknown }>) {
     if (message.role === "system" || message.role === "developer") {
       if (typeof message.content === "string") {
-        message.content = [
-          { type: "text", text: message.content, cache_control: { type: "ephemeral" } },
-        ];
+        message.content = [{ type: "text", text: message.content, cache_control: cacheControl }];
         continue;
       }
       if (Array.isArray(message.content) && message.content.length > 0) {
@@ -244,13 +261,12 @@ export function applyAnthropicEphemeralCacheControlMarkers(
         if (last && typeof last === "object") {
           const record = last as Record<string, unknown>;
           if (record.type !== "thinking" && record.type !== "redacted_thinking") {
-            record.cache_control = { type: "ephemeral" };
+            record.cache_control = cacheControl;
           }
         }
       }
       continue;
     }
-
     if (message.role === "assistant" && Array.isArray(message.content)) {
       for (const block of message.content) {
         if (!block || typeof block !== "object") {

@@ -685,7 +685,16 @@ function applyPrePluginStreamWrappers(ctx: ApplyExtraParamsContext): void {
 function applyPostPluginStreamWrappers(
   ctx: ApplyExtraParamsContext & { providerWrapperHandled: boolean },
 ): void {
-  ctx.agent.streamFn = createOpenRouterSystemCacheWrapper(ctx.agent.streamFn);
+  const openRouterCacheRetention = resolveCacheRetention(
+    ctx.effectiveExtraParams,
+    ctx.provider,
+    typeof ctx.model?.api === "string" ? ctx.model.api : undefined,
+    ctx.modelId,
+  );
+  ctx.agent.streamFn = createOpenRouterSystemCacheWrapper(
+    ctx.agent.streamFn,
+    openRouterCacheRetention,
+  );
   ctx.agent.streamFn = createOpenAIStringContentWrapper(ctx.agent.streamFn);
 
   if (!ctx.providerWrapperHandled) {

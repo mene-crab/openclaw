@@ -2,9 +2,13 @@ import type { StreamFn } from "@mariozechner/pi-agent-core";
 import { streamSimple } from "@mariozechner/pi-ai";
 import type { ThinkLevel } from "../../auto-reply/thinking.js";
 import { normalizeOptionalLowercaseString, readStringValue } from "../../shared/string-coerce.js";
+import {
+  applyAnthropicEphemeralCacheControlMarkers,
+  resolveAnthropicEphemeralCacheControl,
+  type AnthropicEphemeralCacheControl,
+} from "../anthropic-payload-policy.js";
 import { resolveProviderRequestPolicy } from "../provider-attribution.js";
 import { resolveProviderRequestPolicyConfig } from "../provider-request-config.js";
-import { applyAnthropicEphemeralCacheControlMarkers } from "./anthropic-cache-control-payload.js";
 import { isAnthropicModelRef } from "./anthropic-family-cache-semantics.js";
 import { mapThinkingLevelToReasoningEffort } from "./reasoning-effort-utils.js";
 import { streamWithPayloadPatch } from "./stream-payload-utils.js";
@@ -150,8 +154,17 @@ function normalizeProxyReasoningPayload(payload: unknown, thinkingLevel?: ThinkL
   }
 }
 
-export function createOpenRouterSystemCacheWrapper(baseStreamFn: StreamFn | undefined): StreamFn {
+export function createOpenRouterSystemCacheWrapper(
+  baseStreamFn: StreamFn | undefined,
+  cacheRetention?: "short" | "long" | "none",
+): StreamFn {
   const underlying = baseStreamFn ?? streamSimple;
+  // Resolve the cache_control once at wrapper creation time.
+  // When cacheRetention is "long", the resulting marker includes ttl: "1h",
+  // which OpenRouter forwards to Anthropic backend — yielding 1-hour prompt
+  // cache instead of the default 5 minutes.
+  const cacheControl: AnthropicEphemeralCacheControl | undefined =
+    resolveAnthropicEphemeralCacheControl(undefined, cacheRetention);
   return (model, context, options) => {
     const provider = readStringValue(model.provider);
     const modelId = readStringValue(model.id);
@@ -174,9 +187,8 @@ export function createOpenRouterSystemCacheWrapper(baseStreamFn: StreamFn | unde
     ) {
       return underlying(model, context, options);
     }
-
     return streamWithPayloadPatch(underlying, model, context, options, (payloadObj) => {
-      applyAnthropicEphemeralCacheControlMarkers(payloadObj);
+      applyAnthropicEphemeralCacheControlMarkers(payloadObj, cacheControl ?? { type: "ephemeral" });
     });
   };
 }
