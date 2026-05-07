@@ -22,18 +22,12 @@ export function resolveCacheRetention(
 ): CacheRetention | undefined {
   const hasExplicitCacheConfig =
     extraParams?.cacheRetention !== undefined || extraParams?.cacheControlTtl !== undefined;
-  const family = resolveAnthropicCacheRetentionFamily({
-    provider,
-    modelApi,
-    modelId,
-    hasExplicitCacheConfig,
-  });
-  const googleEligible = isGooglePromptCacheEligible({ modelApi, modelId });
 
-  if (!family && !googleEligible) {
-    return undefined;
-  }
-
+  // When the user has explicitly configured cacheRetention (or the legacy
+  // cacheControlTtl), honour it regardless of whether the provider belongs
+  // to a known Anthropic/Google cache family. This allows OpenRouter and
+  // other proxy providers to receive long-TTL cache_control markers when
+  // the operator opts in via config.
   const newVal = extraParams?.cacheRetention;
   if (newVal === "none" || newVal === "short" || newVal === "long") {
     return newVal;
@@ -45,6 +39,20 @@ export function resolveCacheRetention(
   }
   if (legacy === "1h") {
     return "long";
+  }
+
+  // No explicit config — fall back to family-based defaults.
+  const family = resolveAnthropicCacheRetentionFamily({
+    provider,
+    modelApi,
+    modelId,
+    hasExplicitCacheConfig,
+  });
+
+  const googleEligible = isGooglePromptCacheEligible({ modelApi, modelId });
+
+  if (!family && !googleEligible) {
+    return undefined;
   }
 
   return family === "anthropic-direct" ? "short" : undefined;

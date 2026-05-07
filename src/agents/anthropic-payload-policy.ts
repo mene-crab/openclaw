@@ -49,7 +49,7 @@ function isLongTtlEligibleEndpoint(baseUrl: string | undefined): boolean {
   );
 }
 
-function resolveAnthropicEphemeralCacheControl(
+export function resolveAnthropicEphemeralCacheControl(
   baseUrl: string | undefined,
   cacheRetention: AnthropicPayloadPolicyInput["cacheRetention"],
 ): AnthropicEphemeralCacheControl | undefined {
