@@ -7,7 +7,10 @@ import {
   createOpenRouterWrapper,
 } from "./proxy-stream-wrappers.js";
 
-function runSystemCacheWrapper(model: Partial<Model<"openai-completions">>) {
+function runSystemCacheWrapper(
+  model: Partial<Model<"openai-completions">>,
+  extraParams?: Record<string, unknown>,
+) {
   const payload = {
     messages: [{ role: "system", content: "system prompt" }],
   };
@@ -16,7 +19,7 @@ function runSystemCacheWrapper(model: Partial<Model<"openai-completions">>) {
     return createAssistantMessageEventStream();
   };
 
-  const wrapped = createOpenRouterSystemCacheWrapper(baseStreamFn);
+  const wrapped = createOpenRouterSystemCacheWrapper(baseStreamFn, extraParams);
   void wrapped(
     {
       api: "openai-completions",
@@ -208,6 +211,72 @@ describe("proxy stream wrappers", () => {
 
     expect(payload.messages[0]?.content).toEqual([
       { type: "text", text: "system prompt", cache_control: { type: "ephemeral" } },
+    ]);
+  });
+
+  it("includes ttl: 1h in cache_control when cacheRetention is long", () => {
+    const payload = runSystemCacheWrapper({}, { cacheRetention: "long" });
+    expect(payload.messages[0]?.content).toEqual([
+      { type: "text", text: "system prompt", cache_control: { type: "ephemeral", ttl: "1h" } },
+    ]);
+  });
+
+  it("omits ttl in cache_control when cacheRetention is short", () => {
+    const payload = runSystemCacheWrapper({}, { cacheRetention: "short" });
+    expect(payload.messages[0]?.content).toEqual([
+      { type: "text", text: "system prompt", cache_control: { type: "ephemeral" } },
+    ]);
+  });
+
+  it("omits ttl in cache_control when cacheRetention is not provided", () => {
+    const payload = runSystemCacheWrapper({});
+    expect(payload.messages[0]?.content).toEqual([
+      { type: "text", text: "system prompt", cache_control: { type: "ephemeral" } },
+    ]);
+  });
+
+  it("skips cache_control markers when cacheRetention is none but still strips thinking cache_control", () => {
+    const payload = {
+      messages: [
+        { role: "system", content: "system prompt" },
+        {
+          role: "assistant",
+          content: [
+            { type: "thinking", text: "draft", cache_control: { type: "ephemeral" } },
+            { type: "text", text: "answer" },
+          ],
+        },
+      ],
+    } satisfies Record<string, unknown>;
+    const baseStreamFn: StreamFn = (_resolvedModel, _context, options) => {
+      options?.onPayload?.(payload, {} as any);
+      return createAssistantMessageEventStream();
+    };
+    const wrapped = createOpenRouterSystemCacheWrapper(baseStreamFn, { cacheRetention: "none" });
+    wrapped(
+      {
+        id: "anthropic/claude-sonnet-4.6",
+        api: "openai-completions",
+        provider: "openrouter",
+      } as any,
+      {} as any,
+      { onPayload: () => {} } as any,
+    );
+    // System message: no cache_control added
+    expect(payload.messages[0]?.content).toBe("system prompt");
+    // Thinking block: cache_control stripped (sanitizer still active)
+    expect(payload.messages[1]?.content[0]).not.toHaveProperty("cache_control");
+  });
+
+  it("honours cacheRetention on custom provider pointing to openrouter.ai", () => {
+    const payload = runSystemCacheWrapper(
+      { provider: "custom-openrouter", baseUrl: "https://openrouter.ai/api/v1" } as Partial<
+        Model<"openai-completions">
+      >,
+      { cacheRetention: "long" },
+    );
+    expect(payload.messages[0]?.content).toEqual([
+      { type: "text", text: "system prompt", cache_control: { type: "ephemeral", ttl: "1h" } },
     ]);
   });
 });

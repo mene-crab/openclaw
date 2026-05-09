@@ -2,9 +2,13 @@ import type { StreamFn } from "@mariozechner/pi-agent-core";
 import { streamSimple } from "@mariozechner/pi-ai";
 import type { ThinkLevel } from "../../auto-reply/thinking.js";
 import { normalizeOptionalLowercaseString, readStringValue } from "../../shared/string-coerce.js";
+import {
+  applyAnthropicEphemeralCacheControlMarkers,
+  resolveAnthropicEphemeralCacheControl,
+  type AnthropicEphemeralCacheControl,
+} from "../anthropic-payload-policy.js";
 import { resolveProviderRequestPolicy } from "../provider-attribution.js";
 import { resolveProviderRequestPolicyConfig } from "../provider-request-config.js";
-import { applyAnthropicEphemeralCacheControlMarkers } from "./anthropic-cache-control-payload.js";
 import { isAnthropicModelRef } from "./anthropic-family-cache-semantics.js";
 import { mapThinkingLevelToReasoningEffort } from "./reasoning-effort-utils.js";
 import { streamWithPayloadPatch } from "./stream-payload-utils.js";
@@ -150,7 +154,10 @@ function normalizeProxyReasoningPayload(payload: unknown, thinkingLevel?: ThinkL
   }
 }
 
-export function createOpenRouterSystemCacheWrapper(baseStreamFn: StreamFn | undefined): StreamFn {
+export function createOpenRouterSystemCacheWrapper(
+  baseStreamFn: StreamFn | undefined,
+  extraParams?: Record<string, unknown>,
+): StreamFn {
   const underlying = baseStreamFn ?? streamSimple;
   return (model, context, options) => {
     const provider = readStringValue(model.provider);
@@ -164,19 +171,33 @@ export function createOpenRouterSystemCacheWrapper(baseStreamFn: StreamFn | unde
       capability: "llm",
       transport: "stream",
     }).endpointClass;
-    if (
-      !modelId ||
-      !isAnthropicModelRef(modelId) ||
-      !(
-        endpointClass === "openrouter" ||
-        (endpointClass === "default" && normalizeOptionalLowercaseString(provider) === "openrouter")
-      )
-    ) {
+    const isOpenRouterRoute =
+      endpointClass === "openrouter" ||
+      (endpointClass === "default" && normalizeOptionalLowercaseString(provider) === "openrouter");
+    if (!modelId || !isAnthropicModelRef(modelId) || !isOpenRouterRoute) {
       return underlying(model, context, options);
     }
-
+    // Resolve cacheRetention from extraParams only after confirming this
+    // is a verified OpenRouter→Anthropic route. This covers both built-in
+    // and custom-provider OpenRouter hosts (endpoint-class based), so
+    // explicit cacheRetention on any OpenRouter Anthropic route is honoured.
+    const explicitRetention = extraParams?.cacheRetention;
+    const cacheRetention: "short" | "long" | "none" | undefined =
+      explicitRetention === "none" || explicitRetention === "short" || explicitRetention === "long"
+        ? explicitRetention
+        : undefined;
+    // cacheRetention "none" means no new cache markers, but the sanitizer
+    // (thinking/redacted_thinking cleanup) must still run.
+    const cacheControl: AnthropicEphemeralCacheControl | undefined =
+      cacheRetention === "none"
+        ? undefined
+        : resolveAnthropicEphemeralCacheControl(undefined, cacheRetention);
     return streamWithPayloadPatch(underlying, model, context, options, (payloadObj) => {
-      applyAnthropicEphemeralCacheControlMarkers(payloadObj);
+      applyAnthropicEphemeralCacheControlMarkers(
+        payloadObj,
+        cacheControl ?? { type: "ephemeral" },
+        cacheRetention === "none",
+      );
     });
   };
 }
